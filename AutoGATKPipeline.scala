@@ -6,6 +6,7 @@ import org.broadinstitute.sting.queue.extensions.gatk.IndelRealigner
 import org.broadinstitute.sting.queue.extensions.gatk.BaseRecalibrator
 import org.broadinstitute.sting.queue.extensions.gatk.PrintReads
 import org.broadinstitute.sting.queue.extensions.gatk.ReduceReads
+import org.broadinstitute.sting.queue.extensions.gatk.HaplotypeCaller
 
 /**
  * @author G. Tony Wang
@@ -23,13 +24,16 @@ class AutoGATKPipeline extends QScript
   qscript =>
     
   @Input(doc = "Bam files to sort", shortName="I", required = true)
-  var inputs: List[File] = Nil
+  var inputs: Seq[File] = Nil
   
   @Input(doc = "The reference file.", shortName="R", required = true)
   var referenceFile: File = _
   
   @Argument(doc = "known sites of dbsnps and indels", shortName = "knownSites", required = true)
   var knownSitesFiles: List[File] = Nil
+  
+  @Argument(doc = "chromosomal intervals", shortName = "L", required = true)
+  var intervalFiles: List[File] = Nil
   
   
   trait CommonArguments extends CommandLineGATK
@@ -39,59 +43,55 @@ class AutoGATKPipeline extends QScript
   
   def script()
   {
-    val realignTarget = new RealignerTargetCreator with CommonArguments;
-    realignTarget.input_file = qscript.inputs
-    realignTarget.memoryLimit = 10
-    
-    add(realignTarget)
-    
-    // if there's more than BAM files, run RealignerTargetCreator once for each bam.
-    
+   
     if (inputs.size > 1)
     {
       for (bamFile <- inputs)
       {
         val singleRealignTarget = new RealignerTargetCreator with CommonArguments;
+//        singleRealignTarget.I = Seq(bamFile)
         singleRealignTarget.input_file :+= bamFile
-        singleRealignTarget.memoryLimit = 3
-        realignTarget.out = swapExt(bamFile, "bam", "intervals")
+        singleRealignTarget.memoryLimit = 6
+        singleRealignTarget.out = swapExt(bamFile, "bam", "intervals")
         add(singleRealignTarget)
         
         val singleIndelRealign = new IndelRealigner with CommonArguments;
         singleIndelRealign.input_file :+= bamFile
-        singleIndelRealign.targetIntervals = realignTarget.out
+        singleIndelRealign.targetIntervals = singleRealignTarget.out
         singleIndelRealign.out = swapExt(bamFile, "bam", "realigned.bam")
-        singleIndelRealign.memoryLimit = 4
+        singleIndelRealign.memoryLimit = 6
         add(singleIndelRealign)
         
         val baseRecal = new BaseRecalibrator with CommonArguments
         baseRecal.input_file :+= singleIndelRealign.out
         baseRecal.knownSites = qscript.knownSitesFiles
         baseRecal.out = swapExt(singleIndelRealign.out, "bam", "recal.grp")
-        baseRecal.memoryLimit = 4
+        baseRecal.memoryLimit = 6
         add(baseRecal)
         
         val printReads = new PrintReads with CommonArguments
         printReads.input_file :+= singleIndelRealign.out
         printReads.BQSR = baseRecal.out
         printReads.out = swapExt(baseRecal.out, "grp", "bam")
-        printReads.memoryLimit = 3
+        printReads.memoryLimit = 6
         add(printReads)
-        
-/**
- * encountered error with the following code: not found type ReduceReads -- weird
- * 
- *  
+
         val reduceReads = new ReduceReads with CommonArguments
         reduceReads.input_file :+= printReads.out
         reduceReads.out = swapExt(printReads.out, "bam", "compressed.bam")
-        reduceReads.memoryLimit = 4
-        add(reduceReads)
-*/        
+        reduceReads.memoryLimit = 6
+        add(reduceReads)       
         
+        val haploCaller = new HaplotypeCaller with CommonArguments
+       
+        haploCaller.input_file :+= reduceReads.out
+        haploCaller.intervals = qscript.intervalFiles
+        haploCaller.log_to_file = new File("HaploCaller-scala-log.log")
+        haploCaller.out = swapExt(reduceReads.out, "bam", "vcf")
+        haploCaller.memoryLimit = 6
+        add(haploCaller)        
       }
-    }
-    
+     }
   }
   
   
