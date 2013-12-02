@@ -44,6 +44,8 @@ class AutoGATKPipeline extends QScript
   def script()
   {
    
+    var processedFiles = Seq.empty[File]
+    
     if (inputs.size > 1)
     {
       for (bamFile <- inputs)
@@ -81,16 +83,22 @@ class AutoGATKPipeline extends QScript
         reduceReads.out = swapExt(printReads.out, "bam", "compressed.bam")
         reduceReads.memoryLimit = 6
         add(reduceReads)       
-        
-        val haploCaller = new HaplotypeCaller with CommonArguments
        
-        haploCaller.input_file :+= reduceReads.out
+        processedFiles +:= reduceReads.out   // make the multiple bam files as a list and feed it into the VCF caller below
+               
+      }
+      
+      // multiple sample (.bam) for VCF calling
+      val haploCaller = new HaplotypeCaller with CommonArguments
+       
+        haploCaller.input_file = processedFiles
         haploCaller.intervals = qscript.intervalFiles
         haploCaller.log_to_file = new File("HaploCaller-scala-log.log")
-        haploCaller.out = swapExt(reduceReads.out, "bam", "vcf")
-        haploCaller.memoryLimit = 6
-        add(haploCaller)        
-      }
+//        haploCaller.out = swapExt(reduceReads.out, "bam", "vcf")
+        haploCaller.memoryLimit = 12
+        haploCaller.out = new File("HaploCaller-VCF20131127.vcf")
+        
+        add(haploCaller) 
      }
   }
   
